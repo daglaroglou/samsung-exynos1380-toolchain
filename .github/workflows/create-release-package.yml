@@ -1,0 +1,154 @@
+name: Create Toolchain Release Package
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0
+  workflow_dispatch:  # Allow manual triggering
+    inputs:
+      tag_name:
+        description: 'Tag name for the release'
+        required: true
+        default: 'latest'
+
+jobs:
+  create-package:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        lfs: true
+        fetch-depth: 0
+    
+    - name: Checkout LFS objects
+      run: git lfs checkout
+    
+    - name: Create toolchain package
+      run: |
+        # Set package name based on trigger type
+        if [ "${{ github.event_name }}" = "push" ]; then
+          PACKAGE_NAME="samsung-exynos1380-toolchain-${{ github.ref_name }}"
+        else
+          PACKAGE_NAME="samsung-exynos1380-toolchain-${{ github.event.inputs.tag_name }}"
+        fi
+        
+        echo "Creating package: ${PACKAGE_NAME}.tar.gz"
+        
+        # Create temporary directory for packaging
+        mkdir -p "/tmp/${PACKAGE_NAME}"
+        
+        # Copy repository contents excluding unwanted files
+        rsync -av \
+          --exclude='.git' \
+          --exclude='.github' \
+          --exclude='.gitattributes' \
+          --exclude='README.md' \
+          --exclude='*.md' \
+          ./ "/tmp/${PACKAGE_NAME}/"
+        
+        # Create the tar.gz package
+        cd /tmp
+        tar -czf "${PACKAGE_NAME}.tar.gz" "${PACKAGE_NAME}/"
+        
+        # Move package to workspace
+        mv "${PACKAGE_NAME}.tar.gz" "${GITHUB_WORKSPACE}/"
+        
+        # Store package name for later steps
+        echo "PACKAGE_NAME=${PACKAGE_NAME}" >> $GITHUB_ENV
+        echo "PACKAGE_FILE=${PACKAGE_NAME}.tar.gz" >> $GITHUB_ENV
+    
+    - name: Calculate package info
+      run: |
+        PACKAGE_SIZE=$(du -h "${PACKAGE_FILE}" | cut -f1)
+        PACKAGE_SIZE_BYTES=$(stat -f%z "${PACKAGE_FILE}" 2>/dev/null || stat -c%s "${PACKAGE_FILE}")
+        echo "Package size: ${PACKAGE_SIZE} (${PACKAGE_SIZE_BYTES} bytes)"
+        echo "PACKAGE_SIZE=${PACKAGE_SIZE}" >> $GITHUB_ENV
+        echo "PACKAGE_SIZE_BYTES=${PACKAGE_SIZE_BYTES}" >> $GITHUB_ENV
+    
+    - name: Upload package as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.PACKAGE_NAME }}
+        path: ${{ env.PACKAGE_FILE }}
+        retention-days: 30
+    
+    - name: Create Release (for tag pushes)
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Samsung Exynos1380 Toolchain ${{ github.ref_name }}
+        body: |
+          # Samsung Exynos1380 Toolchain Release ${{ github.ref_name }}
+          
+          This release contains the complete Samsung Exynos1380 development toolchain.
+          
+          ## Package Contents
+          - Clang compiler toolchain (clang-r450784d)
+          - GCC cross-compiler (x86_64-linux-glibc2.17-4.8)
+          - Android build tools and utilities
+          - Kernel build tools
+          - System libraries and headers
+          
+          ## Package Information
+          - **File**: `${{ env.PACKAGE_FILE }}`
+          - **Size**: ${{ env.PACKAGE_SIZE }}
+          - **Architecture**: x86_64 Linux
+          
+          ## Installation
+          ```bash
+          # Extract the toolchain
+          tar -xzf ${{ env.PACKAGE_FILE }}
+          
+          # Add to PATH (example)
+          export PATH="$PWD/${{ env.PACKAGE_NAME }}/clang/host/linux-x86/clang-r450784d/bin:$PATH"
+          export PATH="$PWD/${{ env.PACKAGE_NAME }}/prebuilts/build-tools/linux-x86/bin:$PATH"
+          ```
+          
+          ## Verification
+          ```bash
+          # Verify clang installation
+          clang --version
+          
+          # Verify build tools
+          ninja --version
+          make --version
+          ```
+        draft: false
+        prerelease: false
+        
+    - name: Upload Release Asset (for tag pushes)
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{ env.PACKAGE_FILE }}
+        asset_name: ${{ env.PACKAGE_FILE }}
+        asset_content_type: application/gzip
+    
+    - name: Summary
+      run: |
+        echo "## 📦 Toolchain Package Created" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Package Name**: \`${{ env.PACKAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **File**: \`${{ env.PACKAGE_FILE }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Size**: ${{ env.PACKAGE_SIZE }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ github.event_name }}" = "push" ]; then
+          echo "- **Tag**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release**: Created automatically" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Tag**: \`${{ github.event.inputs.tag_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release**: Manual trigger - no release created" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "The package is available as a workflow artifact and can be downloaded from the Actions tab." >> $GITHUB_STEP_SUMMARY
