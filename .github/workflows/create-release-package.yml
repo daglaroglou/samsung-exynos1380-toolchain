@@ -1,10 +1,7 @@
 name: Create Toolchain Release Package
 
 on:
-  push:
-    tags:
-      - 'v*'  # Trigger on version tags like v1.0.0
-  workflow_dispatch:  # Allow manual triggering
+  workflow_dispatch:  # Manual triggering only
     inputs:
       tag_name:
         description: 'Tag name for the release'
@@ -27,12 +24,8 @@ jobs:
     
     - name: Create toolchain package
       run: |
-        # Set package name based on trigger type
-        if [ "${{ github.event_name }}" = "push" ]; then
-          PACKAGE_NAME="samsung-exynos1380-toolchain-${{ github.ref_name }}"
-        else
-          PACKAGE_NAME="samsung-exynos1380-toolchain-${{ github.event.inputs.tag_name }}"
-        fi
+        # Set package name from manual input
+        PACKAGE_NAME="samsung-exynos1380-toolchain-${{ github.event.inputs.tag_name }}"
         
         echo "Creating package: ${PACKAGE_NAME}.tar.gz"
         
@@ -67,23 +60,55 @@ jobs:
         echo "PACKAGE_SIZE=${PACKAGE_SIZE}" >> $GITHUB_ENV
         echo "PACKAGE_SIZE_BYTES=${PACKAGE_SIZE_BYTES}" >> $GITHUB_ENV
     
-    - name: Upload package as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.PACKAGE_NAME }}
-        path: ${{ env.PACKAGE_FILE }}
-        retention-days: 30
+    - name: Determine release details
+      run: |
+        # Use the input tag name from manual dispatch
+        TAG_NAME="${{ github.event.inputs.tag_name }}"
+        RELEASE_NAME="Samsung Exynos1380 Toolchain ${{ github.event.inputs.tag_name }}"
+        
+        # Mark manual releases as prerelease if not a version tag
+        if [[ "${{ github.event.inputs.tag_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          PRERELEASE="false"
+        else
+          PRERELEASE="true"
+        fi
+        
+        echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
+        echo "RELEASE_NAME=${RELEASE_NAME}" >> $GITHUB_ENV
+        echo "PRERELEASE=${PRERELEASE}" >> $GITHUB_ENV
     
-    - name: Create Release (for tag pushes)
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    - name: Create or update tag
+      run: |
+        # Create or update tag for the release
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Delete existing tag if it exists (for updating releases)
+        git tag -d "${{ env.TAG_NAME }}" 2>/dev/null || true
+        git push origin --delete "${{ env.TAG_NAME }}" 2>/dev/null || true
+        
+        # Create new tag
+        git tag -a "${{ env.TAG_NAME }}" -m "Release ${{ env.TAG_NAME }}"
+        git push origin "${{ env.TAG_NAME }}"
+    
+    - name: Delete existing release (if updating)
+      continue-on-error: true
+      run: |
+        # Try to delete existing release (useful for updating)
+        gh release delete "${{ env.TAG_NAME }}" --yes 2>/dev/null || true
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Create Release
       uses: actions/create-release@v1
+      id: create_release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ github.ref_name }}
-        release_name: Samsung Exynos1380 Toolchain ${{ github.ref_name }}
+        tag_name: ${{ env.TAG_NAME }}
+        release_name: ${{ env.RELEASE_NAME }}
         body: |
-          # Samsung Exynos1380 Toolchain Release ${{ github.ref_name }}
+          # ${{ env.RELEASE_NAME }}
           
           This release contains the complete Samsung Exynos1380 development toolchain.
           
@@ -98,6 +123,7 @@ jobs:
           - **File**: `${{ env.PACKAGE_FILE }}`
           - **Size**: ${{ env.PACKAGE_SIZE }}
           - **Architecture**: x86_64 Linux
+          - **Created**: Manually triggered
           
           ## Installation
           ```bash
@@ -118,11 +144,13 @@ jobs:
           ninja --version
           make --version
           ```
+          
+          ---
+          *Generated on ${{ github.run_id }} • Commit: ${{ github.sha }}*
         draft: false
-        prerelease: false
+        prerelease: ${{ env.PRERELEASE }}
         
-    - name: Upload Release Asset (for tag pushes)
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    - name: Upload Release Asset
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -134,21 +162,17 @@ jobs:
     
     - name: Summary
       run: |
-        echo "## 📦 Toolchain Package Created" >> $GITHUB_STEP_SUMMARY
+        echo "## 📦 Toolchain Release Created" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "- **Package Name**: \`${{ env.PACKAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
         echo "- **File**: \`${{ env.PACKAGE_FILE }}\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Size**: ${{ env.PACKAGE_SIZE }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Tag**: \`${{ env.TAG_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Release Type**: ${{ env.PRERELEASE == 'true' && 'Pre-release' || 'Release' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Trigger**: Manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        
-        if [ "${{ github.event_name }}" = "push" ]; then
-          echo "- **Tag**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Release**: Created automatically" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "- **Tag**: \`${{ github.event.inputs.tag_name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Release**: Manual trigger - no release created" >> $GITHUB_STEP_SUMMARY
-        fi
-        
+        echo "🎉 **Release created successfully!**" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "The package is available as a workflow artifact and can be downloaded from the Actions tab." >> $GITHUB_STEP_SUMMARY
+        echo "📥 **Download**: [Release Page](https://github.com/${{ github.repository }}/releases/tag/${{ env.TAG_NAME }})" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "The toolchain package is now available as a permanent release and can be downloaded from the Releases page." >> $GITHUB_STEP_SUMMARY
