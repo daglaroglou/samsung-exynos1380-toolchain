@@ -24,10 +24,10 @@ jobs:
     
     - name: Create toolchain package
       run: |
-        # Set package name from manual input
-        PACKAGE_NAME="samsung-exynos1380-toolchain-${{ github.event.inputs.tag_name }}"
+        # Set fixed package name
+        PACKAGE_NAME="toolchain"
         
-        echo "Creating package: ${PACKAGE_NAME}.tar.gz"
+        echo "Creating package: toolchain.tar.gz"
         
         # Create temporary directory for packaging
         mkdir -p "/tmp/${PACKAGE_NAME}"
@@ -41,16 +41,16 @@ jobs:
           --exclude='*.md' \
           ./ "/tmp/${PACKAGE_NAME}/"
         
-        # Create the tar.gz package
+        # Create the tar.gz package with fixed name
         cd /tmp
-        tar -czf "${PACKAGE_NAME}.tar.gz" "${PACKAGE_NAME}/"
+        tar -czf "toolchain.tar.gz" "${PACKAGE_NAME}/"
         
         # Move package to workspace
-        mv "${PACKAGE_NAME}.tar.gz" "${GITHUB_WORKSPACE}/"
+        mv "toolchain.tar.gz" "${GITHUB_WORKSPACE}/"
         
         # Store package name for later steps
         echo "PACKAGE_NAME=${PACKAGE_NAME}" >> $GITHUB_ENV
-        echo "PACKAGE_FILE=${PACKAGE_NAME}.tar.gz" >> $GITHUB_ENV
+        echo "PACKAGE_FILE=toolchain.tar.gz" >> $GITHUB_ENV
     
     - name: Calculate package info
       run: |
@@ -64,49 +64,20 @@ jobs:
       run: |
         # Use the input tag name from manual dispatch
         TAG_NAME="${{ github.event.inputs.tag_name }}"
-        RELEASE_NAME="Samsung Exynos1380 Toolchain ${{ github.event.inputs.tag_name }}"
+        RELEASE_NAME="OSRC"
         
-        # Mark manual releases as prerelease if not a version tag
-        if [[ "${{ github.event.inputs.tag_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          PRERELEASE="false"
-        else
-          PRERELEASE="true"
-        fi
+        # Never mark as prerelease
+        PRERELEASE="false"
         
         echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
         echo "RELEASE_NAME=${RELEASE_NAME}" >> $GITHUB_ENV
         echo "PRERELEASE=${PRERELEASE}" >> $GITHUB_ENV
     
-    - name: Create or update tag
-      run: |
-        # Create or update tag for the release
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        
-        # Delete existing tag if it exists (for updating releases)
-        git tag -d "${{ env.TAG_NAME }}" 2>/dev/null || true
-        git push origin --delete "${{ env.TAG_NAME }}" 2>/dev/null || true
-        
-        # Create new tag
-        git tag -a "${{ env.TAG_NAME }}" -m "Release ${{ env.TAG_NAME }}"
-        git push origin "${{ env.TAG_NAME }}"
-    
-    - name: Delete existing release (if updating)
-      continue-on-error: true
-      run: |
-        # Try to delete existing release (useful for updating)
-        gh release delete "${{ env.TAG_NAME }}" --yes 2>/dev/null || true
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
     - name: Create Release
-      uses: actions/create-release@v1
-      id: create_release
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ env.TAG_NAME }}
-        release_name: ${{ env.RELEASE_NAME }}
+        name: ${{ env.RELEASE_NAME }}
         body: |
           # ${{ env.RELEASE_NAME }}
           
@@ -120,7 +91,7 @@ jobs:
           - System libraries and headers
           
           ## Package Information
-          - **File**: `${{ env.PACKAGE_FILE }}`
+          - **File**: `toolchain.tar.gz`
           - **Size**: ${{ env.PACKAGE_SIZE }}
           - **Architecture**: x86_64 Linux
           - **Created**: Manually triggered
@@ -128,11 +99,11 @@ jobs:
           ## Installation
           ```bash
           # Extract the toolchain
-          tar -xzf ${{ env.PACKAGE_FILE }}
+          tar -xzf toolchain.tar.gz
           
           # Add to PATH (example)
-          export PATH="$PWD/${{ env.PACKAGE_NAME }}/clang/host/linux-x86/clang-r450784d/bin:$PATH"
-          export PATH="$PWD/${{ env.PACKAGE_NAME }}/prebuilts/build-tools/linux-x86/bin:$PATH"
+          export PATH="$PWD/toolchain/clang/host/linux-x86/clang-r450784d/bin:$PATH"
+          export PATH="$PWD/toolchain/prebuilts/build-tools/linux-x86/bin:$PATH"
           ```
           
           ## Verification
@@ -147,28 +118,24 @@ jobs:
           
           ---
           *Generated on ${{ github.run_id }} • Commit: ${{ github.sha }}*
+        files: toolchain.tar.gz
         draft: false
-        prerelease: ${{ env.PRERELEASE }}
-        
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
+        prerelease: false
+        make_latest: true
+        fail_on_unmatched_files: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ${{ env.PACKAGE_FILE }}
-        asset_name: ${{ env.PACKAGE_FILE }}
-        asset_content_type: application/gzip
     
     - name: Summary
       run: |
         echo "## 📦 Toolchain Release Created" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "- **Package Name**: \`${{ env.PACKAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **File**: \`${{ env.PACKAGE_FILE }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Package Name**: \`toolchain\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **File**: \`toolchain.tar.gz\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Size**: ${{ env.PACKAGE_SIZE }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Tag**: \`${{ env.TAG_NAME }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **Release Type**: ${{ env.PRERELEASE == 'true' && 'Pre-release' || 'Release' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Release Name**: \`OSRC\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Release Type**: Release" >> $GITHUB_STEP_SUMMARY
         echo "- **Trigger**: Manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "🎉 **Release created successfully!**" >> $GITHUB_STEP_SUMMARY
