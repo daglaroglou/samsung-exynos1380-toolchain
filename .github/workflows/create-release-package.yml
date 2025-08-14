@@ -79,8 +79,6 @@ jobs:
         tag_name: ${{ env.TAG_NAME }}
         name: ${{ env.RELEASE_NAME }}
         body: |
-          # ${{ env.RELEASE_NAME }}
-          
           This release contains the complete Samsung Exynos1380 development toolchain.
           
           ## Package Contents
